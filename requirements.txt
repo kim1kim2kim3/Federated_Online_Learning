@@ -1,0 +1,16 @@
+# Core Machine Learning & GNN Libraries
+torch
+torch-scatter
+torch-geometric
+
+# Data Processing & Numerical Computing
+numpy
+pandas
+scipy
+
+# Visualization & Reporting
+matplotlib
+xlsxwriter
+
+# Configuration
+pyyaml

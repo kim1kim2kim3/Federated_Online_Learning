@@ -155,6 +155,23 @@ class SelectionPolicyTests(unittest.TestCase):
         server.update_train_data(4, server.clients)
         self.assertTrue(all(client.train_dataset_delayed is not None for client in server.clients))
 
+    def test_rounds_default_uses_all_available_online_windows(self):
+        base_server = reload_module("base_server")
+        server = base_server.BaseFLServer(SimpleNamespace(rounds=-1))
+        server.max_epoch = 10
+        server.train_per_num_samples = 1
+
+        self.assertEqual(server._resolve_rounds(), 10)
+
+    def test_rounds_rejects_values_beyond_available_online_windows(self):
+        base_server = reload_module("base_server")
+        server = base_server.BaseFLServer(SimpleNamespace(rounds=11))
+        server.max_epoch = 10
+        server.train_per_num_samples = 1
+
+        with self.assertRaises(ValueError):
+            server._resolve_rounds()
+
     def test_base_local_execute_passes_explicit_should_train_flag(self):
         base_server = reload_module("base_server")
         server = base_server.BaseFLServer(SimpleNamespace(delay=0))
@@ -183,7 +200,7 @@ class SelectionPolicyTests(unittest.TestCase):
         self.assertEqual([client.eval_calls for client in server.clients], [1, 1, 1])
 
     def test_client_local_execute_signature_and_training_gate_are_decoupled_from_selected(self):
-        source = (ROOT / "client_oa.py").read_text()
+        source = (ROOT / "client_oa.py").read_text(encoding="utf-8")
         # Use source assertions instead of importing client_oa because this environment lacks torch_geometric.
         self.assertIn("def local_execute(self, state_dict_to_load, should_train=False):", source)
         self.assertIn("if should_train and self.train_dataset_delayed is not None:", source)

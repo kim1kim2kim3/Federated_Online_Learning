@@ -11,6 +11,38 @@ import random
 import matplotlib.pyplot as plt
 
 
+def read_traffic_hdf(filename):
+    """Read known DCRNN traffic HDF layouts without relying on key auto-detect."""
+    for key in (None, "df", "speed"):
+        try:
+            return pd.read_hdf(filename, key=key)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    # Fallback for legacy fixed-format HDF files that pandas 3/PyTables may not
+    # decode directly. DCRNN files store a single group named either `df` or
+    # `speed` with axis0/axis1/block0_values arrays.
+    import tables
+
+    with tables.open_file(filename, mode="r") as h5:
+        if hasattr(h5.root, "df"):
+            group = h5.root.df
+        elif hasattr(h5.root, "speed"):
+            group = h5.root.speed
+        else:
+            raise ValueError(
+                f"Unable to read traffic HDF file {filename}. "
+                "Expected group 'df' or 'speed'."
+            )
+
+        columns = group.axis0.read()
+        if getattr(columns, "dtype", None) is not None and columns.dtype.kind == "S":
+            columns = [value.decode("utf-8") for value in columns]
+        index = pd.to_datetime(group.axis1.read())
+        values = group.block0_values.read()
+        return pd.DataFrame(values, index=index, columns=columns)
+
+
 def generate_graph_seq2seq_io_data(df, x_offsets, y_offsets
                                    , add_time_in_day=True, add_day_in_week=False):
 
@@ -43,7 +75,7 @@ def generate_graph_seq2seq_io_data(df, x_offsets, y_offsets
 
 def generate_train_val_test(args):
     random.seed(0)
-    df = pd.read_hdf(args.traffic_df_filename)
+    df = read_traffic_hdf(args.traffic_df_filename)
 
 
     x_offsets = np.sort(

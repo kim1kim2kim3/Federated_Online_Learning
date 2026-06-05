@@ -72,8 +72,7 @@ class BaseFLServer(object):
         """
         학습 라운드를 반복하고 메트릭을 기록하는 공통 학습 루프입니다.
         """
-        # rounds = self.max_epoch - 1 - self.train_per_num_samples
-        rounds = 10  # 기본 테스트용 라운드 수
+        rounds = self._resolve_rounds()
         
         # 결과 기록을 위한 워크북 생성
         workbook = xlsxwriter.Workbook('{}_{}.xlsx'.format(self.config.dataset, self.config.pred_steps))
@@ -94,6 +93,31 @@ class BaseFLServer(object):
             print('prediction rmse is: {} '.format(train_loss))
 
         workbook.close()
+
+    def _resolve_rounds(self):
+        """
+        Resolve the number of online rounds to execute.
+
+        `rounds <= 0` means use the full stream. For a window size of
+        `train_per_num_samples`, the last valid current-evaluation slice starts
+        at `max_epoch - train_per_num_samples`.
+        """
+        max_available_rounds = self.max_epoch - self.train_per_num_samples + 1
+        if max_available_rounds <= 0:
+            raise ValueError(
+                "Dataset is shorter than train_per_num_samples; "
+                "no valid online rounds are available."
+            )
+
+        rounds = int(getattr(self.config, 'rounds', -1))
+        if rounds <= 0:
+            return max_available_rounds
+        if rounds > max_available_rounds:
+            raise ValueError(
+                f"rounds={rounds} exceeds the available online rounds "
+                f"({max_available_rounds})."
+            )
+        return rounds
 
     def train_round(self, rround):
         """

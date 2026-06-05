@@ -7,6 +7,7 @@ adj_mx: "pems.pkl" #pems.pkl or adj_mx.pkl
 num_clients: 50
 kl_threshold: 0.0003
 delay: "pred_steps" # label delay; "pred_steps" keeps delay equal to prediction horizon
+rounds: 0 # if rounds <=0 then it's full rounds, otherwise it's the number of rounds to run
 
 
 # for client model

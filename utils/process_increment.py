@@ -1,5 +1,6 @@
 import os
 import pickle
+import io
 from functools import partial
 
 import numpy as np
@@ -34,12 +35,21 @@ class IdentityScaler:
 
 
 def load_pickle(pickle_file):
+    """Load pickle files, including legacy text pickles checked out with CRLF."""
     try:
         with open(pickle_file, 'rb') as f:
             pickle_data = pickle.load(f)
     except UnicodeDecodeError as e:
         with open(pickle_file, 'rb') as f:
             pickle_data = pickle.load(f, encoding='latin1')
+    except pickle.UnpicklingError:
+        # Some legacy DCRNN graph pickles are protocol-0 text pickles. If Git
+        # checked them out with CRLF line endings, Python's pickle parser can
+        # fail with "the STRING opcode argument must be quoted". Normalize only
+        # for this fallback path and keep the on-disk file unchanged.
+        with open(pickle_file, 'rb') as f:
+            normalized = f.read().replace(b'\r\n', b'\n')
+        pickle_data = pickle.load(io.BytesIO(normalized), encoding='latin1')
     except Exception as e:
         print('Unable to load data ', pickle_file, ':', e)
         raise

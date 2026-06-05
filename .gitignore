@@ -6,6 +6,13 @@ __pycache__/
 # Baseline folder
 Baseline_folder/
 
+# Data folder
+data/
+
+# Local tool state and experiment outputs
+.omx/
+*.xlsx
+
 # C extensions
 *.so
 

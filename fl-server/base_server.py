@@ -4,7 +4,6 @@ import xlsxwriter
 from torch.utils.data import TensorDataset
 from copy import deepcopy
 from utils.process_increment import load_dataset
-from client_oa import Client
 
 class BaseFLServer(object):
     """
@@ -20,6 +19,8 @@ class BaseFLServer(object):
         """
         데이터셋을 로드하고 클라이언트 모델들을 생성하는 공통 초기화 로직입니다.
         """
+        from client_oa import Client
+
         print('Booting {} fl-server...'.format(self.config.agg_model))
         self.num_clients = self.config.num_clients
         print('Total clients: {}'.format(self.num_clients))

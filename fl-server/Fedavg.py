@@ -1,63 +1,271 @@
+from __future__ import annotations
+
+import math
+from typing import Any, Mapping
+
 import numpy as np
 import torch
-from copy import deepcopy
+from torch.utils.data import TensorDataset
+
 from base_server import BaseFLServer
+from client_fedavg import FedAvgClient
+from utils.process_increment import load_dataset
+
+
+def clone_state(state: Mapping[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    return {
+        name: tensor.detach().cpu().clone()
+        for name, tensor in state.items()
+    }
+
 
 class FedAvg(BaseFLServer):
+    """Partial-participation FedAvg under the delayed-label protocol.
 
-    def __init__(self, config):
-        # 부모 클래스 초기화 (데이터 로딩, 클라이언트 생성 준비 등)
-        super().__init__(config)
+    Each client keeps a persistent local history ``P_k`` of samples whose labels
+    have arrived.  Every round still evaluates the current sample for every
+    client from the current global model, while ``fedavg_client_fraction`` only
+    controls which history-bearing clients perform local FedAvg training and
+    contribute to aggregation.
+    """
 
-    def boot(self):
-        # 1. 공통 준비 실행
-        super().boot()
-        
-        # 2. 추가적인 초기화가 필요하다면 여기에 작성 (예: 추가 신경망 선언)
-        # self.agg_layer = nn.Linear(...)
-        pass
+    def boot(self) -> None:
+        print("Booting {} fl-server...".format(self.config.agg_model))
+        self.num_clients = int(self.config.num_clients)
+        print("Total clients: {}".format(self.num_clients))
 
-    def aggregate(self, local_states, agg_id_list, round):
+        data, _ = load_dataset(
+            name=self.config.dataset,
+            adj_mx_name=self.config.adj_mx,
+            num_clients=self.num_clients,
+            pred_len=self.config.pred_steps,
+        )
+        self.data = data
+        self.input_size = int(self.data["x"].shape[-1] + self.data["x_attr"].shape[-1])
+        self.output_size = int(self.data["y"].shape[-1])
+        self.max_epoch = int(data["x"].shape[0])
+        self.train_per_num_samples = 1
+        self.delay = self._resolve_label_delay()
 
+        np.random.seed(int(self.config.seed))
+        torch.manual_seed(int(self.config.seed))
+
+        self.clients = []
+        self.fedavg_history_indices: dict[int, list[int]] = {}
+        for client_i in range(self.num_clients):
+            initial_dataset = TensorDataset(
+                data["x"][: self.train_per_num_samples, :, client_i : client_i + 1, :],
+                data["y"][: self.train_per_num_samples, :, client_i : client_i + 1, :],
+                data["x_attr"][: self.train_per_num_samples, :, client_i : client_i + 1, :],
+                data["y_attr"][: self.train_per_num_samples, :, client_i : client_i + 1, :],
+            )
+            self.clients.append(
+                FedAvgClient(
+                    client_id=client_i,
+                    client_dataset=initial_dataset,
+                    feature_scaler=self.data["feature_scaler"],
+                    input_size=self.input_size,
+                    output_size=self.output_size,
+                    args=self.config,
+                )
+            )
+            history: list[int] = []
+            self.fedavg_history_indices[client_i] = history
+            self.clients[-1].fedavg_history_indices = history
+
+        self.global_model = clone_state(self.clients[0].model.state_dict())
+
+    def train_round(self, rround: int) -> dict[str, Any]:
+        self.update_train_data(rround, self.clients)
+        selected_client_ids = self.select_clients(rround)
+        print("selected clients：", selected_client_ids)
+        local_logs, local_states = self.local_execute(selected_client_ids)
+        self.aggregate(local_states, rround)
+        agg_log = self.aggregate_local_logs(local_logs)
+        return {
+            "loss": torch.tensor(0).float(),
+            "progress_bar": agg_log,
+            "log": agg_log,
+        }
+
+    def select_clients(self, rround: int | None = None) -> list[int]:
+        """Sample history-bearing clients using FedAvg's C fraction.
+
+        The default ``fedavg_client_fraction=1.0`` preserves all-client FedAvg.
+        Smaller values implement standard FedAvg partial participation over
+        clients whose persistent local dataset ``P_k`` is non-empty.
+        Current-round evaluation is still performed for every client; this
+        selection controls only local history training and server aggregation.
+        """
+        histories = self._ensure_history_storage()
+        eligible = [
+            int(client.client_id)
+            for client in self.clients
+            if len(histories.get(int(client.client_id), [])) > 0
+        ]
+        if not eligible:
+            self.last_selected_client_ids = []
+            return []
+
+        fraction = self._client_fraction()
+        if fraction >= 1.0:
+            selected_client_ids = eligible
+        else:
+            sample_size = max(1, math.ceil(len(eligible) * fraction))
+            rng = np.random.default_rng(int(self.config.seed) + int(rround or 0))
+            selected_client_ids = sorted(
+                int(client_id)
+                for client_id in rng.choice(eligible, size=sample_size, replace=False)
+            )
+        self.last_selected_client_ids = selected_client_ids
+        return selected_client_ids
+
+    def local_execute(
+        self,
+        selected_client_ids: list[int],
+    ) -> tuple[list[dict[str, Any]], list[tuple[dict[str, torch.Tensor], int]]]:
+        local_logs = []
+        local_states = []
+        selected_id_set = set(selected_client_ids)
+        histories = self._ensure_history_storage()
+        for client in self.clients:
+            client_id = int(client.client_id)
+            history_dataset = None
+            if client_id in selected_id_set:
+                history_indices = histories.get(client_id, [])
+                if history_indices:
+                    history_dataset = self._make_history_dataset(client_id, history_indices)
+            result = client.run_round(
+                global_state=self.global_model,
+                current_dataset=client.current_dataset,
+                delayed_dataset=history_dataset,
+            )
+            local_logs.append(result["log"])
+            if history_dataset is not None:
+                local_states.append((clone_state(result["state_dict"]), len(history_dataset)))
+        return local_logs, local_states
+
+    def update_train_data(self, rround: int, clients: list[FedAvgClient]) -> None:
+        histories = self._ensure_history_storage()
+        for client in clients:
+            client_id = int(client.client_id)
+            client.current_dataset = TensorDataset(
+                self.data["x"][
+                    int(rround) - 1 : self.train_per_num_samples + int(rround) - 1,
+                    :,
+                    client_id : client_id + 1,
+                    :,
+                ],
+                self.data["y"][
+                    int(rround) - 1 : self.train_per_num_samples + int(rround) - 1,
+                    :,
+                    client_id : client_id + 1,
+                    :,
+                ],
+                self.data["x_attr"][
+                    int(rround) - 1 : self.train_per_num_samples + int(rround) - 1,
+                    :,
+                    client_id : client_id + 1,
+                    :,
+                ],
+                self.data["y_attr"][
+                    int(rround) - 1 : self.train_per_num_samples + int(rround) - 1,
+                    :,
+                    client_id : client_id + 1,
+                    :,
+                ],
+            )
+            client.delayed_dataset = None
+
+            if int(rround) > self.delay:
+                train_idx = int(rround) - 1 - self.delay
+                histories.setdefault(client_id, []).append(train_idx)
+
+    def aggregate(
+        self,
+        local_states: list[tuple[Mapping[str, torch.Tensor], int]],
+        rround: int,
+    ) -> None:
+        del rround
         if not local_states:
-            # 이번 라운드에 선택된 클라이언트가 아무도 없다면 기존 글로벌 모델을 유지
+            return
+        total_samples = sum(num_samples for _, num_samples in local_states)
+        if total_samples <= 0:
             return
 
-        # 1. 각 클라이언트별 학습 데이터 샘플 수(가중치) 계산
-        total_samples = 0
-        client_samples = []
-        for client_id in agg_id_list:
-            client = self.clients[client_id]
-            # 지연 학습에 사용된 실제 데이터 샘플 수 
-            num_samples = len(client.train_dataset_delayed) if client.train_dataset_delayed is not None else 0
-            client_samples.append(num_samples)
-            total_samples += num_samples
+        names = set(local_states[0][0].keys())
+        for state, _ in local_states:
+            if set(state.keys()) != names:
+                raise ValueError("all FedAvg state dictionaries must have the same keys")
 
-        if total_samples == 0:
-            return
+        aggregated: dict[str, torch.Tensor] = {}
+        first_state = local_states[0][0]
+        for name, first_tensor in first_state.items():
+            if torch.is_floating_point(first_tensor):
+                total = torch.zeros_like(first_tensor, dtype=torch.float64)
+                for state, num_samples in local_states:
+                    weight = float(num_samples) / float(total_samples)
+                    total = total + state[name].detach().cpu().double() * weight
+                aggregated[name] = total.to(dtype=first_tensor.dtype).clone()
+            else:
+                aggregated[name] = first_tensor.detach().cpu().clone()
 
-        # 2. 템플릿용 뼈대 딕셔너리 복사 (첫 번째 클라이언트의 가중치를 시작점으로 활용)
-        agg_state_dict = deepcopy(local_states[0])
-        
-        # 3. 첫 번째 클라이언트의 가중치에 먼저 자신의 weight를 곱해둠
-        weight_0 = client_samples[0] / total_samples
-        for key in agg_state_dict.keys():
-            # 부동소수점 연산을 위해 잠시 float으로 계산
-            agg_state_dict[key] = (agg_state_dict[key].float() * weight_0)
+        self.global_model = aggregated
 
-        # 4. 나머지 클라이언트들에 대해 가중 평균 누적
-        for idx in range(1, len(local_states)):
-            weight = client_samples[idx] / total_samples
-            state_dict = local_states[idx]
-            
-            for key in agg_state_dict.keys():
-                # device를 강제하지 않고 타겟 텐서(agg_state_dict[key])의 device를 따라감
-                update_val = state_dict[key].to(agg_state_dict[key].device).float() * weight
-                agg_state_dict[key] += update_val
+    def _client_fraction(self) -> float:
+        fraction = float(getattr(self.config, "fedavg_client_fraction", 1.0))
+        if not (0.0 < fraction <= 1.0):
+            raise ValueError("fedavg_client_fraction must satisfy 0 < C <= 1.")
+        return fraction
 
-        # 5. 원래의 데이터 타입(dtype)으로 복원 (예: 정수형 num_batches_tracked 보존)
-        for key in agg_state_dict.keys():
-            agg_state_dict[key] = agg_state_dict[key].to(local_states[0][key].dtype)
+    def _ensure_history_storage(self) -> dict[int, list[int]]:
+        histories = getattr(self, "fedavg_history_indices", None)
+        if histories is None:
+            histories = {}
+        elif not isinstance(histories, dict):
+            histories = {
+                int(client_id): list(history)
+                for client_id, history in enumerate(histories)
+            }
 
-        # 6. 새로 병합된 가중치로 글로벌 모델 업데이트
-        self.global_model = agg_state_dict
+        for client in getattr(self, "clients", []):
+            client_id = int(client.client_id)
+            history = histories.get(client_id)
+            if history is None:
+                existing = getattr(client, "fedavg_history_indices", None)
+                history = list(existing) if existing is not None else []
+                histories[client_id] = history
+            client.fedavg_history_indices = history
+        self.fedavg_history_indices = histories
+        return histories
+
+    def _make_history_dataset(self, client_id: int, history_indices: list[int]) -> TensorDataset:
+        return TensorDataset(
+            self.data["x"][
+                history_indices,
+                :,
+                client_id : client_id + 1,
+                :,
+            ],
+            self.data["y"][
+                history_indices,
+                :,
+                client_id : client_id + 1,
+                :,
+            ],
+            self.data["x_attr"][
+                history_indices,
+                :,
+                client_id : client_id + 1,
+                :,
+            ],
+            self.data["y_attr"][
+                history_indices,
+                :,
+                client_id : client_id + 1,
+                :,
+            ],
+        )
+
+
+__all__ = ["FedAvg", "FedAvgClient", "clone_state"]

@@ -1,13 +1,19 @@
 # for the setup of fl
 seed: 111
 pred_steps: 12 #prediction steps 1, 6, 12
-agg_model: "" # e.g. "refol"
+agg_model: "" # e.g. "refol", "fedavg", "fedostc"
 dataset: "PEMS-BAY" # METR-LA or PEMS-BAY
 adj_mx: "pems.pkl" #pems.pkl or adj_mx.pkl
 num_clients: 50
+fedavg_client_fraction: 1.0 # FedAvg client fraction C over clients with non-empty persistent local history
 kl_threshold: 0.0003
 delay: "pred_steps" # label delay; "pred_steps" keeps delay equal to prediction horizon
 rounds: 0 # if rounds <=0 then it's full rounds, otherwise it's the number of rounds to run
+
+# for FedOSTC exact-path adaptation
+fedostc_encoder_hidden_size: 64
+fedostc_decoder_hidden_size: 128
+period_steps: 288
 
 
 # for client model

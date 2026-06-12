@@ -3,6 +3,7 @@ from config import config
 sys.path.append('./fl-server')
 from Refol import REFOL
 from Fedavg import FedAvg
+from Fedostc import FedOSTC
 
 
 if __name__ == "__main__":
@@ -10,6 +11,7 @@ if __name__ == "__main__":
     server_registry = {
         "refol": REFOL,  # REFOL
         "fedavg": FedAvg, # FedAvg
+        "fedostc": FedOSTC,
     }
     agg_model = (config.agg_model or "").lower()
     if not agg_model:

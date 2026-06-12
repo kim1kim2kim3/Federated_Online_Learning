@@ -1,12 +1,28 @@
 import torch
 import torch.nn as nn
 from torch_geometric.data import DataLoader
+from torch.utils.data import TensorDataset
 from collections import defaultdict
 from utils.process_increment import unscaled_metrics
 from models.fl_model import GRU
 from copy import deepcopy
 import numpy as np
 import scipy.stats
+
+
+def compact_history_dataset(dataset):
+    """Store delayed-history data without cloning the full source storage.
+
+    `BaseFLServer.update_train_data()` builds one-sample TensorDataset slices
+    from the full streaming tensors.  A plain `deepcopy(TensorDataset)` can copy
+    the underlying full storage for those views, which is catastrophic in
+    full-round REFOL runs.  Clone only the visible slice tensors instead.
+    """
+    if isinstance(dataset, TensorDataset):
+        return TensorDataset(
+            *(tensor.detach().clone() for tensor in dataset.tensors)
+        )
+    return deepcopy(dataset)
 
 class Client(object):
 
@@ -123,7 +139,7 @@ class Client(object):
                             param.grad.data.zero_()
 
             # 역사적 데이터셋 갱신 (드리프트 비교 기준)
-            self.h_client_dataset = deepcopy(self.train_dataset_delayed)
+            self.h_client_dataset = compact_history_dataset(self.train_dataset_delayed)
 
         self.state_dict = deepcopy(self.model.to(self.device).state_dict())
 

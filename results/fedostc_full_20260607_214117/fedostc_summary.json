@@ -1,0 +1,23 @@
+{
+  "rounds_completed": 52093,
+  "mean_rmse": 4.768749369333132,
+  "mean_mae": 4.460302384386704,
+  "last": {
+    "round": 52093,
+    "rmse": 2.032607316970825,
+    "mae": 1.8783233165740967
+  },
+  "best_rmse": {
+    "round": 280,
+    "rmse": 0.9379131197929382,
+    "mae": 0.8719134330749512
+  },
+  "agg_model": "fedostc",
+  "metrics_path": "/home/y/Paper_2/Federated_Online_Learning/results/fedostc_full_20260607_214117/fedostc_metrics.csv",
+  "progress_path": "/home/y/Paper_2/Federated_Online_Learning/results/fedostc_full_20260607_214117/fedostc_progress.log",
+  "elapsed_sec": 31219.604,
+  "rss_mb": 1715.941,
+  "cuda_allocated_mb": 37.661,
+  "cuda_reserved_mb": 64.0,
+  "cuda_max_allocated_mb": 46.645
+}

@@ -1,0 +1,20 @@
+{
+  "rounds_completed": 2,
+  "mean_rmse": 67.94783401489258,
+  "mean_mae": 67.94644165039062,
+  "last": {
+    "round": 2,
+    "rmse": 67.95043182373047,
+    "mae": 67.94901275634766
+  },
+  "best_rmse": {
+    "round": 1,
+    "rmse": 67.94523620605469,
+    "mae": 67.9438705444336
+  },
+  "agg_model": "refol",
+  "metrics_path": "results/stream_smoke/refol_metrics.csv",
+  "progress_path": "results/stream_smoke/refol_progress.log",
+  "elapsed_sec": 1.011,
+  "rss_mb": 1418.383
+}

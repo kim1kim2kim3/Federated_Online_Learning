@@ -1,0 +1,20 @@
+{
+  "dataset": "PEMS-BAY",
+  "adj_mx": "pems.pkl",
+  "num_clients": 50,
+  "pred_steps": 12,
+  "delay": "pred_steps",
+  "rounds": 52093,
+  "data_x_shape": [
+    52093,
+    12,
+    50,
+    1
+  ],
+  "data_y_shape": [
+    52093,
+    12,
+    50,
+    1
+  ]
+}

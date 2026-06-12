@@ -1,0 +1,20 @@
+{
+  "rounds_completed": 2,
+  "mean_rmse": 67.87166976928711,
+  "mean_mae": 67.8703727722168,
+  "last": {
+    "round": 2,
+    "rmse": 67.8742904663086,
+    "mae": 67.87297058105469
+  },
+  "best_rmse": {
+    "round": 1,
+    "rmse": 67.86904907226562,
+    "mae": 67.8677749633789
+  },
+  "agg_model": "fedostc",
+  "metrics_path": "results/stream_smoke/fedostc_metrics.csv",
+  "progress_path": "results/stream_smoke/fedostc_progress.log",
+  "elapsed_sec": 3.288,
+  "rss_mb": 1623.91
+}

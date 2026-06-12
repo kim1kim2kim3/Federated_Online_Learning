@@ -62,29 +62,47 @@ class REFOL(BaseFLServer):
         tmp_model = self.global_model
         if tmp_model is None:
             tmp_model = deepcopy(local_states[0])
-        local_states.append(tmp_model)
+        states_for_aggregation = list(local_states) + [tmp_model]
 
-        # 4. 모델 가중치 텐서 평탄화 및 노드 피처 행렬(Feature Matrix) 구성
-        local_results = []
-        for i, local_train_result in enumerate(local_states):
-            for name in local_train_result:
-                local_results += local_train_result[name].flatten().tolist()
-        local_results = torch.Tensor(local_results).view((len(sample_id) + 1, -1))
+        # 4. 모델 가중치 텐서 평탄화 및 노드 피처 행렬(Feature Matrix) 구성.
+        # Python list/tolist 기반 flattening은 full-round 실행에서 큰 임시 객체를
+        # 만들기 쉽다. Tensor concat/stack으로 구성하고, aggregation GCN은 학습
+        # 대상이 아니므로 autograd graph를 보존하지 않는다.
+        state_names = list(states_for_aggregation[0].keys())
+        flat_states = []
+        for state in states_for_aggregation:
+            flat_states.append(
+                torch.cat(
+                    [
+                        state[name].detach().reshape(-1).float().cpu()
+                        for name in state_names
+                    ],
+                    dim=0,
+                )
+            )
+        local_results = torch.stack(flat_states, dim=0)
 
         # 5. GCN을 통해 가중치 전파 수행
         self.gcn.to(self.device)
-        local_results = self.gcn(
-            x=local_results.to(self.device),
-            edge_index=edge_index.to(self.device)
-        )
+        with torch.no_grad():
+            local_results = self.gcn(
+                x=local_results.to(self.device),
+                edge_index=edge_index.to(self.device)
+            )
         
         # 6. GCN 출력 행렬에서 마지막 노드(서버)의 피처를 추출해 글로벌 모델로 재배치
-        global_model = local_results[-1]
+        global_model = local_results[-1].detach().cpu()
         agg_state_dict = {}
         len_start = 0
-        for name in local_train_result:
-            length = len(local_train_result[name].flatten().tolist())
-            agg_state_dict[name] = global_model[len_start:len_start + length].reshape_as(local_train_result[name])
+        template_state = states_for_aggregation[0]
+        for name in state_names:
+            length = template_state[name].numel()
+            agg_state_dict[name] = (
+                global_model[len_start:len_start + length]
+                .reshape_as(template_state[name])
+                .to(dtype=template_state[name].dtype)
+                .clone()
+            )
             len_start += length
             
         self.global_model = agg_state_dict

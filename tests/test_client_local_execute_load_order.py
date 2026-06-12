@@ -71,6 +71,19 @@ def install_stubs():
     torch.device = lambda name: name
     torch.no_grad = Context
     torch.enable_grad = Context
+    torch_utils = types.ModuleType("torch.utils")
+    torch_utils_data = types.ModuleType("torch.utils.data")
+
+    class TensorDataset:
+        def __init__(self, *tensors):
+            self.tensors = tensors
+
+        def __iter__(self):
+            return iter(zip(*self.tensors))
+
+    torch_utils_data.TensorDataset = TensorDataset
+    torch_utils.data = torch_utils_data
+    torch.utils = torch_utils
 
     nn = types.ModuleType("torch.nn")
     nn.MSELoss = nn.L1Loss = nn.SmoothL1Loss = Loss
@@ -108,6 +121,8 @@ def install_stubs():
     sys.modules.update({
         "torch": torch,
         "torch.nn": nn,
+        "torch.utils": torch_utils,
+        "torch.utils.data": torch_utils_data,
         "torch_geometric": torch_geometric,
         "torch_geometric.data": pyg_data,
         "utils": utils_pkg,

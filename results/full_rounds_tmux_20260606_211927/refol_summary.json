@@ -1,0 +1,20 @@
+{
+  "rounds_completed": 52093,
+  "mean_rmse": 6.745038837421566,
+  "mean_mae": 5.932780162375002,
+  "last": {
+    "round": 52093,
+    "rmse": 3.9830029010772705,
+    "mae": 2.5986881256103516
+  },
+  "best_rmse": {
+    "round": 1886,
+    "rmse": 1.5759942531585693,
+    "mae": 1.3965643644332886
+  },
+  "agg_model": "refol",
+  "metrics_path": "/home/y/Paper_2/Federated_Online_Learning/results/full_rounds_tmux_20260606_211927/refol_metrics.csv",
+  "progress_path": "/home/y/Paper_2/Federated_Online_Learning/results/full_rounds_tmux_20260606_211927/refol_progress.log",
+  "elapsed_sec": 18742.277,
+  "rss_mb": 1655.438
+}
